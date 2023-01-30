@@ -1,0 +1,263 @@
+#include "mod_menu.as"
+#include "hspcmp.as"
+#uselib "user32.dll"
+#func GetWindowLong "GetWindowLongA" int,int 
+#func SetWindowLong "SetWindowLongA" int,int,int
+#packopt hide 1
+
+#define EM_LINEINDEX 0x00BB
+
+#define EM_LINEFROMCHAR 0x00C9
+#define EM_GETSEL 0x00B0
+
+screen 0,ginfo(20),ginfo(21),2,,,640,480
+GetWindowLong hwnd,-16
+SetWindowLong hwnd,-16,stat|$10000|$40000
+gsel 0,1
+filename="無題"
+title "簡易版HSPエディタ - "+filename
+
+oncmd gosub *OnCommand, WM_COMMAND	//  メッセージ割り込み
+// サブメニュー作成
+newmenu hfilemenu, 1
+addmenu hfilemenu, "新規作成(&N)", 2
+addmenu hfilemenu, "開く(&O)", 3
+addmenu hfilemenu, "上書き保存(&S)", 4
+addmenu hfilemenu, "名前をつけて保存(&A)", 5
+addmenu hfilemenu, "", 0, 0x0800
+addmenu hfilemenu, "印刷(&P)", 5
+addmenu hfilemenu, "", 0, 0x0800
+addmenu hfilemenu, "終了(&Q)", 1
+// トップメニュー作成
+newmenu hmenu, 0
+addmenu hmenu, "ファイル(&F)", hfilemenu, 0x10
+
+// サブメニュー作成
+newmenu hHSPmenu, 1
+addmenu hHSPmenu, "コンパイル+実行(&C)", 6
+addmenu hHSPmenu, "実行(&R)", 7
+addmenu hHSPmenu, "コンパイルのみ(&P)", 8
+addmenu hHSPmenu, "エラー表示(&E)", 9
+addmenu hHSPmenu, "オブジェクトファイル作成(&B)", 10
+addmenu hHSPmenu, "start.axファイル作成(&S)", 11
+// トップメニュー作成
+addmenu hmenu, "ＨＳＰ(&P)", hHSPmenu, 0x10
+
+applymenu hmenu
+
+sdim text
+mesbox text,ginfo_winx,ginfo_winy,5,0
+boxid=stat
+hEdit = objinfo_hwnd(boxid)
+oncmd gosub *resize,0x5	//WM_SIZE。ウィンドウサイズ変更時にここにジャンプする。
+onkey gosub *onkeypush
+stop
+
+//メッセージの処理
+*OnCommand
+cmd = wparam & 0xFFFF
+if cmd == 1 : end
+if cmd == 2:gosub *newfile
+if cmd == 3:gosub *fileload
+if cmd == 4:gosub *filesave
+if cmd == 5:gosub *printing
+if cmd == 6:gosub *compile_run
+if cmd == 7:gosub *run_
+if cmd == 8:gosub *compile
+if cmd == 9:gosub *verror
+if cmd == 10:gosub *cobjf
+if cmd == 11:gosub *cstartax
+return
+
+*newfile
+if text!=""{
+	if isSave=0{
+		dialog "現在の作業内容を保存しますか?",2,"簡易版HSPエディタ"
+		if stat=6{
+			dirc=dir_cur
+			dialog "hsp",17,"HSPスクリプトファイル"
+			filepath=refstr
+			chdir dirc
+			if stat=1{
+				notesel text
+				notesave filepath
+			}
+		}
+	}
+}
+text=""
+objprm boxid,text
+filepath=""
+filename="無題"
+title "簡易版HSPエディタ - "+filename
+return
+
+*fileload
+if text!=""{
+	if isSave=0{
+		dialog "現在の作業内容を保存しますか?",2,"簡易版HSPエディタ"
+		if stat=6{
+			dirc=dir_cur
+			dialog "hsp|as",17,"HSPスクリプトファイル|HSPヘッダーファイル"
+			filepath=refstr
+			chdir dirc
+			if stat=1{
+				notesel text
+				notesave filepath
+				filename = getpath(filepath,8)
+				title "簡易版HSPエディタ - "+filename
+			}
+		}
+	}
+}
+dirc=dir_cur
+dialog "hsp|as",16,"HSPスクリプトファイル|HSPヘッダーファイル"
+filepath=refstr
+chdir dirc
+if stat=1{
+	notesel text
+	noteload filepath
+	objprm boxid,text
+	filename = getpath(filepath,8)
+	title "簡易版HSPエディタ - "+filename
+}
+return
+
+*filesave
+if filepath=""{
+	gosub *fileasave
+	return
+}
+notesel text
+notesave filepath
+filename = getpath(filepath,8)
+title "簡易版HSPエディタ - "+filename
+return
+
+*fileasave
+dirc=dir_cur
+dialog "hsp|as",17,"HSPスクリプトファイル|HSPヘッダーファイル"
+filepath=refstr
+chdir dirc
+if stat=6{
+	notesel text
+	notesave filepath
+	filename = getpath(filepath,8)
+	title "簡易版HSPエディタ - "+filename
+}
+return
+
+*printing
+if filepath=""{
+	gosub *fileasave
+	if stat!=6:return
+}
+exec filepath,32
+return
+
+*compile_run
+if filepath=""{
+	gosub *fileasave
+	if stat!=6:return
+}
+dirc=dir_cur
+chdir getpath(filepath,32)
+objname="obj" ; オブジェクトファイル名
+hsc_ini filepath
+hsc_objname objname
+hsc_comp 1,4 ; コンパイル
+mesbuf=""
+res=stat:if res!=0 :hsc_getmes mesbuf:dialog mesbuf,0,"簡易版HSPエディタ"
+
+hsc3_getruntime rtname, objname ; ランタイム名を取得
+if rtname="" : rtname="hsp3.exe"
+debug_mode=0 ; デバッグウィンドウ表示フラグ
+
+cmdexe = "\""+dir_exe+"\\"+rtname+"\" "+objname
+hsc3_run cmdexe, debug_mode ; ランタイムを実行する
+return
+
+*run_
+dirc=dir_cur
+chdir getpath(filepath,32)
+objname="obj" ; オブジェクトファイル名
+hsc3_getruntime rtname, objname ; ランタイム名を取得
+if rtname="" : rtname="hsp3.exe"
+debug_mode=0 ; デバッグウィンドウ表示フラグ
+
+cmdexe = "\""+dir_exe+"\\"+rtname+"\" "+objname
+hsc3_run cmdexe, debug_mode ; ランタイムを実行する
+chdir dirc
+return
+
+*compile
+if filepath=""{
+	gosub *fileasave
+	if stat!=6:return
+}
+objname="obj" ; オブジェクトファイル名
+hsc_ini filepath
+hsc_objname objname
+hsc_comp 1,4 ; コンパイル
+mesbuf=""
+res=stat:if res!=0 :hsc_getmes mesbuf:dialog mesbuf,0,"簡易版HSPエディタ"
+return
+
+*verror
+mesbuf=""
+hsc_getmes mesbuf:dialog mesbuf,0,"簡易版HSPエディタ"
+return
+
+*cobjf
+if filepath=""{
+	gosub *fileasave
+	if stat!=6:return
+}
+objname="obj" ; オブジェクトファイル名
+hsc_ini filepath
+hsc_objname objname
+hsc_comp 1,4 ; コンパイル
+dialog "オブジェクトファイルを作成しました",0,"簡易版HSPエディタ"
+return
+
+*cstartax
+if filepath=""{
+	gosub *fileasave
+	if stat!=6:return
+}
+objname="start.ax" ; オブジェクトファイル名
+hsc_ini filepath
+hsc_objname objname
+hsc_comp 1,4 ; コンパイル
+mesbuf=""
+res=stat:if res!=0 :hsc_getmes mesbuf:dialog mesbuf,0,"簡易版HSPエディタ"
+return
+
+*resize
+if (wParam=0)|(wParam=2) {
+	//
+	//ウィンドウのサイズが変わった時の処理をここに書く
+	//
+	//行番号取得(0から始まる)
+	sendmsg hEdit,  EM_LINEFROMCHAR, -1, 0
+	nLineIndex = stat
+
+	//カーソル位置の行の先頭のインデックスを取得(1行1列目からカーソルのある行の先頭までの文字数-1)
+	sendmsg hEdit, EM_LINEINDEX, -1, 0
+	nLineHIndex = stat
+
+	//カーソル位置のインデックスを取得(1行1列目からカーソルの位置までの文字数-1)
+	nCaretIndex = 0
+	sendmsg hEdit, EM_GETSEL, varptr(nCaretIndex), 0
+	clrobj boxid,boxid
+	pos 0,0
+	mesbox text,ginfo_winx,ginfo_winy,5,0
+	boxid=stat
+	hEdit = objinfo_hwnd(boxid)
+	sendmsg hEdit, EM_SETSEL, nLineIndex+1, (nCaretIndex-nLineHIndex+1)
+}
+return 0
+
+*onkeypush
+title "簡易版HSPエディタ - "+filename+" *"
+return
